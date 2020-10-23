@@ -1,0 +1,1 @@
+sudo target/release/bt-rngd | pv -b -a -t | dieharder -g 200 -d a

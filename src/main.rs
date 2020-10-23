@@ -11,17 +11,49 @@ fn main() -> Result<(), BridgeError> {
     // connects to a device with the product ID of 0x5bf0.
     let bridge = UsbBridge::new().pid(0x5bf0).create()?;
 
-    // Enable the oscillator. Note that this address may change,
-    // so consult the `csr.csv` for your device.
-    bridge.poke(0xf001_7000, 3 | (100 << 2) | (8 << 22))?;
+    let ram_a = 0x4008_0000;
+    let burst_len = 512 * 1024;
 
     loop {
-        // Wait until the `Ready` flag is `1`
-        // while bridge.peek(0xf001_7008)? & 1 == 0 {}
-
-        // Read the random word and write it to stdout
-        handle
-            .write_all(&bridge.peek(0xf001_7004)?.to_le_bytes())
-            .unwrap();
+        let page = bridge.burst_read(ram_a, burst_len).unwrap();
+        // flush data to stdout
+        handle.write_all(&page)?;
     }
+    
+    /* read sync doesn't work due to caching
+    let ram_b = 0x4010_0000;
+    let read_sync = 0x4007_0000;
+    let messible_out = 0xf000f004;
+
+    let mut last_phase = 0x40; // unit state
+    loop {
+        // wait for a new phase
+        loop {
+	   let cur_phase = bridge.peek(messible_out)?;
+	   if cur_phase != last_phase {
+	      last_phase = cur_phase;
+	      break;
+	   }
+        }
+	// dispatch on phase
+        if last_phase == 0x41 {
+	   eprintln!("A");
+	   let page = bridge.burst_read(ram_a, burst_len).unwrap();
+	   
+   	   // update read ack
+	   bridge.poke(read_sync, 1)?;
+	   
+	   // flush data to stdout
+	   handle.write_all(&page)?;
+	} else {
+	   eprintln!("B");
+	   let page = bridge.burst_read(ram_b, burst_len).unwrap();
+	   
+   	   // update read ack
+	   bridge.poke(read_sync, 1)?;
+	   
+	   // flush data to stdout
+	   handle.write_all(&page)?;
+	}
+    } */
 }
