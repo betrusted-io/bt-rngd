@@ -1,1 +1,0 @@
-../../libeb-c/README.rst
