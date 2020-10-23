@@ -1,0 +1,18 @@
+[package]
+name = "libusb-sys-wishbone-tool"
+version = "0.2.6"
+authors = ["Sean Cross <sean@xobs.io>", "David Cuddeback <david.cuddeback@gmail.com>"]
+description = "Vendored copy of FFI bindings for libusb."
+license = "MIT"
+homepage = "https://github.com/dcuddeback/libusb-sys"
+repository = "https://github.com/dcuddeback/libusb-sys.git"
+readme = "README.md"
+keywords = ["usb", "libusb", "hardware", "bindings"]
+links = "usb-1.0"
+build = "build.rs"
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1.0"

@@ -1,0 +1,6 @@
+*.swp
+*.swo
+*~
+litex-devmem2
+*.o
+*.d
