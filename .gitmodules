@@ -1,0 +1,3 @@
+[submodule "wishbone-utils"]
+	path = wishbone-utils
+	url = https://github.com/betrusted-io/wishbone-utils.git
