@@ -2,6 +2,7 @@
 
 use std::io::{self, Write};
 use wishbone_bridge::{UsbBridge, BridgeError};
+use std::{thread, time};
 
 fn main() -> Result<(), BridgeError> {
     let stdout = io::stdout();
@@ -14,46 +15,62 @@ fn main() -> Result<(), BridgeError> {
     let ram_a = 0x4008_0000;
     let burst_len = 512 * 1024;
 
+    /*
     loop {
         let page = bridge.burst_read(ram_a, burst_len).unwrap();
         // flush data to stdout
         handle.write_all(&page)?;
-    }
-    
-    /* read sync doesn't work due to caching
-    let ram_b = 0x4010_0000;
-    let read_sync = 0x4007_0000;
-    let messible_out = 0xf000f004;
+    }*/
 
-    let mut last_phase = 0x40; // unit state
+    let ram_b = 0x4010_0000;
+    let messible2_in = 0xf001_0000; // replace with messible2_in
+    let messible_out = 0xf000_f004;
+
+    let mut phase = 0x1;
+    bridge.poke(messible2_in, 1)?;
+    bridge.poke(messible2_in, 2)?;
     loop {
         // wait for a new phase
-        loop {
-	   let cur_phase = bridge.peek(messible_out)?;
-	   if cur_phase != last_phase {
-	      last_phase = cur_phase;
-	      break;
-	   }
+        while phase != bridge.peek(messible_out)? {
+            thread::sleep(time::Duration::from_millis(10));
+            //eprintln!("waiting for {}, got {} ", phase, bridge.peek(messible_out)?);
         }
-	// dispatch on phase
-        if last_phase == 0x41 {
-	   eprintln!("A");
-	   let page = bridge.burst_read(ram_a, burst_len).unwrap();
-	   
-   	   // update read ack
-	   bridge.poke(read_sync, 1)?;
-	   
-	   // flush data to stdout
-	   handle.write_all(&page)?;
-	} else {
-	   eprintln!("B");
-	   let page = bridge.burst_read(ram_b, burst_len).unwrap();
-	   
-   	   // update read ack
-	   bridge.poke(read_sync, 1)?;
-	   
-	   // flush data to stdout
-	   handle.write_all(&page)?;
-	}
-    } */
+        thread::sleep(time::Duration::from_millis(5));
+
+        // dispatch on phase
+        if phase == 1 {
+            bridge.poke(messible2_in, 2)?; // sending 2 fills B
+            // so read A
+            let page = match bridge.burst_read(ram_a, burst_len) {
+                Err(e) => {
+                    eprintln!("USB bridge error {}, ignoring packet (phase 1)", e);
+                    vec![] // just skip this data and return the next packet
+                },
+                Ok(data) => data
+            };
+
+            phase = 2;
+
+            // flush data to stdout
+            //eprintln!("read {} bytes", page.len());
+            handle.write_all(&page)?;
+        } else {
+            bridge.poke(messible2_in, 1)?; // sending 1 fills A
+            // so read B
+            let page = match bridge.burst_read(ram_b, burst_len) {
+                Err(e) => {
+                    eprintln!("USB bridge error {}, ignoring packet (phase 2)", e);
+                    vec![]
+                },
+                Ok(data) => data
+            };
+
+            phase = 1;
+
+            // flush data to stdout
+            //eprintln!("read {} bytes", page.len());
+            handle.write_all(&page)?;
+        }
+        thread::sleep(time::Duration::from_millis(5));
+    }
 }
