@@ -1,1 +1,2 @@
 sudo target/release/bt-rngd | pv -b -a -t | dieharder -g 200 -d a
+sudo target/release/bt-rngd | pv -b -a -t | dieharder -g 200 -a | tee dieharder_result.txt
