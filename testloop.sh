@@ -6,8 +6,8 @@ while [ 1 ]
 do
     dd if=/dev/urandom of=/tmp/rtest bs=1024 count=256
     md5sum /tmp/rtest
-    sudo wishbone-utils/wishbone-tool/target/release/wishbone-tool 0x40080000 --burst-source /tmp/rtest
-    sudo wishbone-utils/wishbone-tool/target/release/wishbone-tool 0x40080000 --burst-length 262144 | diff -s /tmp/rtest -
+    sudo wishbone-utils/wishbone-tool/target/release/wishbone-tool 0x40800000 --burst-source /tmp/rtest
+    sudo wishbone-utils/wishbone-tool/target/release/wishbone-tool 0x40800000 --burst-length 262144 | diff -s /tmp/rtest -
     if [ $? -ne 0 ]
     then
        errors=$((errors+1))
