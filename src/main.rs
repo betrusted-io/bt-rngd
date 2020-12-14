@@ -68,7 +68,7 @@ fn main() -> Result<(), BridgeError> {
         }
 
         // wait for a new phase -- don't check the "have", just read the fifo, b/c USB packets are expensive
-    	let timeout = time::Duration::from_millis(10_000);
+    	let timeout = time::Duration::from_millis(20_000);
     	let now = time::Instant::now();
         while phase != bridge.peek(messible_out)? {
             thread::sleep(time::Duration::from_millis(5));
