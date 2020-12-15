@@ -1,10 +1,65 @@
 // set up USB: https://workshop.fomu.im/en/latest/requirements.html#setup-udev-rules (works for Ubuntu)
 
 use std::io::{self, Write};
+use std::fs::File;
 use wishbone_bridge::{UsbBridge, BridgeError};
 use std::{thread, time};
 
+fn block_is_good(block: &Vec<u8>) -> bool {
+    let mut maxrun = 0;
+    let mut histogram: [usize; 256] = [0; 256];
+    let total = block.len();
+
+    let mut last: u8 = 0;
+    let mut lastrun = 0;
+    for val in block.iter() {
+        // runs check on a u8 -- this is a pathology of USB getting stuck
+        if *val == last {
+            lastrun += 1;
+        } else {
+            if lastrun > maxrun {
+                maxrun = lastrun;
+            }
+            lastrun = 0;
+            last = *val;
+        }
+
+        histogram[*val as usize] += 1;
+    }
+
+    let mut max = 0;
+    for i in 0..256 {
+        if histogram[i] > max {
+            max = histogram[i];
+        }
+    }
+    if max > ((total / 256) * 4) {
+        return false;
+    }
+    if maxrun > 4 {
+        return false;
+    }
+
+    true
+}
+
+fn diag_print(logfile: &mut File, block: &Vec<u8>, blocks: i32) {
+    write!(logfile, "Suspicious block found block {}, suppressing.\n", blocks).unwrap();
+    write!(logfile, "Block for guru meditation:").unwrap();
+    let mut index = 0;
+    for data in block.iter() {
+        if (index % 64) == 0 {
+            write!(logfile, "\n0x{:05x}: ", index).unwrap();
+        }
+        index += 1;
+        write!(logfile, "{:02x} ", *data).unwrap();
+    }
+    write!(logfile, "\n\n").unwrap();
+}
+
 fn main() -> Result<(), BridgeError> {
+    let mut logfile = File::create("log.txt")?;
+
     let stdout = io::stdout();
     let mut handle = stdout.lock();
 
@@ -26,6 +81,7 @@ fn main() -> Result<(), BridgeError> {
         handle.write_all(&page)?;
     }*/
 
+    let mut blocks = 0;
     let mut phase = 0x1;
     bridge.poke(messible2_in, 2)?;  // start with a fill request for the next phase, so we can meet the lockstep criteria
     loop {
@@ -47,7 +103,13 @@ fn main() -> Result<(), BridgeError> {
 
             // flush data to stdout
             // eprintln!("read {} bytes", page.len());
-            handle.write_all(&page)?;
+            if block_is_good(&page) {
+                handle.write_all(&page)?;
+                blocks += 1;
+                write!(logfile, "block {} ok\n", blocks).unwrap();
+            } else {
+                diag_print(&mut logfile, &page, blocks);
+            }
         } else {
             bridge.poke(messible2_in, 2)?; // sending 2 concurrently fills B
 
@@ -64,8 +126,15 @@ fn main() -> Result<(), BridgeError> {
 
             // flush data to stdout
             // eprintln!("read {} bytes", page.len());
-            handle.write_all(&page)?;
+            if block_is_good(&page) {
+                handle.write_all(&page)?;
+                blocks += 1;
+                write!(logfile, "block {} ok\n", blocks).unwrap();
+            } else {
+                diag_print(&mut logfile, &page, blocks);
+            }
         }
+        logfile.sync_all().unwrap();
 
         // wait for a new phase -- don't check the "have", just read the fifo, b/c USB packets are expensive
     	let timeout = time::Duration::from_millis(20_000);
