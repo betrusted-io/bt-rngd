@@ -97,6 +97,7 @@ fn main() -> Result<(), BridgeError> {
             let page = match bridge.burst_read(ram_b, burst_len) {
                 Err(e) => {
                     eprintln!("USB bridge error {}, ignoring packet (phase 1)", e);
+		    write!(logfile, "USB bridge error, ignoring packet\n").unwrap();
                     vec![] // just skip this data and return the next packet
                 },
                 Ok(data) => data
@@ -119,6 +120,7 @@ fn main() -> Result<(), BridgeError> {
             // read A while B fills
             let page = match bridge.burst_read(ram_a, burst_len) {
                 Err(e) => {
+		    write!(logfile, "USB bridge error, ignoring packet\n").unwrap();
                     eprintln!("USB bridge error {}, ignoring packet (phase 2)", e);
                     vec![]
                 },
@@ -147,6 +149,7 @@ fn main() -> Result<(), BridgeError> {
             //eprintln!("waiting for {}, got {} ", phase, bridge.peek(messible_out)?);
             if now.elapsed() >= timeout {
                 eprintln!("Timeout synchronizing phase, advancing phase counter anyways.");
+		write!(logfile, "Timeout synchronizing phase, advancing phase counter anyways.\n").unwrap();
                 break;
             }
         }
