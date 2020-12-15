@@ -5,6 +5,9 @@ use std::fs::File;
 use wishbone_bridge::{UsbBridge, BridgeError};
 use std::{thread, time};
 
+/// purpose of this is to find USB link issues. Suspecting that over very long
+/// runs, we are having some bad blocks that have repeated elements. Capture for later
+/// diagnosis.
 fn block_is_good(block: &Vec<u8>) -> bool {
     let mut maxrun = 0;
     let mut histogram: [usize; 256] = [0; 256];
