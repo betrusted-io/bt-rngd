@@ -142,11 +142,11 @@ fn main() -> Result<(), BridgeError> {
         logfile.sync_all().unwrap();
 
         // wait for a new phase -- don't check the "have", just read the fifo, b/c USB packets are expensive
-    	let timeout = time::Duration::from_millis(20_000);
+    	let timeout = time::Duration::from_millis(60_000);
+        let now = time::Instant::now();
         while phase != bridge.peek(messible_out)? {
-            thread::sleep(time::Duration::from_millis(5));
+            thread::sleep(time::Duration::from_millis(50));
             //eprintln!("waiting for {}, got {} ", phase, bridge.peek(messible_out)?);
-            let now = time::Instant::now();
             if now.elapsed() >= timeout {
                 eprintln!("Timeout synchronizing phase, advancing phase counter anyways.");
 		        write!(logfile, "Timeout synchronizing phase, advancing phase counter anyways.\n").unwrap();
