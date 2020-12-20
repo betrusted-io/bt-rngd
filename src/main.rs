@@ -5,6 +5,11 @@ use std::fs::File;
 use wishbone_bridge::{UsbBridge, BridgeError};
 use std::{thread, time};
 
+fn do_vecs_match<T: PartialEq>(a: &Vec<T>, b: &Vec<T>) -> bool {
+    let matching = a.iter().zip(b.iter()).filter(|&(a, b)| a == b).count();
+    matching == a.len() && matching == b.len()
+}
+
 /// purpose of this is to find USB link issues. Suspecting that over very long
 /// runs, we are having some bad blocks that have repeated elements. Capture for later
 /// diagnosis.
@@ -85,16 +90,35 @@ fn main() -> Result<(), BridgeError> {
     }*/
 
     let mut blocks = 0;
-    let mut phase = 0x1;
-    bridge.poke(messible2_in, 2)?;  // start with a fill request for the next phase, so we can meet the lockstep criteria
+    let mut phase = 0;
+    let mut old_a: Vec<u8> = Vec::new();
+    let mut old_b: Vec<u8> = Vec::new();
     loop {
+        // wait for a new phase -- don't check the "have", just read the fifo, b/c USB packets are expensive
+    	let timeout = time::Duration::from_millis(120_000);
+        let now = time::Instant::now();
+        loop {
+            let mval = bridge.peek(messible_out)?;
+            if mval > phase {
+                phase = mval;
+                break;
+            }
+            thread::sleep(time::Duration::from_millis(100));
+            //eprintln!("waiting for {}, got {} ", phase, bridge.peek(messible_out)?);
+            if now.elapsed() >= timeout {
+                eprintln!("Timeout synchronizing phase, advancing phase counter anyways.");
+                write!(logfile, "Timeout synchronizing phase, advancing phase counter anyways.\n").unwrap();
+                phase = mval;
+                bridge.poke(messible2_in, phase)?;
+                break;
+            }
+        }
         // dispatch on phase
-        if phase == 1 {
-	    // in this case, we must have requested B buffer to fill, because we got a B (that is, 2) ACK
-            bridge.poke(messible2_in, 1)?; // sending 1 request concurrent fill of A while we read B
+        if phase % 2 == 1 {
+            bridge.poke(messible2_in, phase)?; // sending anything increments the buffer phase
 
-            // read B concurrently with A fill
-            let page = match bridge.burst_read(ram_b, burst_len) {
+            // read A concurrently with B fill
+            let page = match bridge.burst_read(ram_a, burst_len) {
                 Err(e) => {
                     eprintln!("USB bridge error {}, ignoring packet (phase 1)", e);
 		    write!(logfile, "USB bridge error, ignoring packet\n").unwrap();
@@ -103,22 +127,25 @@ fn main() -> Result<(), BridgeError> {
                 Ok(data) => data
             };
 
-            phase = 2;
-
             // flush data to stdout
             // eprintln!("read {} bytes", page.len());
             if block_is_good(&page) {
-                handle.write_all(&page)?;
-                blocks += 1;
-                write!(logfile, "block {} ok\n", blocks).unwrap();
+                if do_vecs_match(&page, &old_a) || do_vecs_match(&page, &old_b) {
+                    write!(logfile, "exact match found (protocol error), skipping").unwrap();
+                } else {
+                    handle.write_all(&page)?;
+                    blocks += 1;
+                    write!(logfile, "block {} ok\n", blocks).unwrap();
+                }
             } else {
                 diag_print(&mut logfile, &page, blocks);
             }
+            old_a = page.clone();
         } else {
-            bridge.poke(messible2_in, 2)?; // sending 2 concurrently fills B
+            bridge.poke(messible2_in, phase)?; // sending anything increments the buffer phase
 
-            // read A while B fills
-            let page = match bridge.burst_read(ram_a, burst_len) {
+            // read B while A fills
+            let page = match bridge.burst_read(ram_b, burst_len) {
                 Err(e) => {
 		    write!(logfile, "USB bridge error, ignoring packet\n").unwrap();
                     eprintln!("USB bridge error {}, ignoring packet (phase 2)", e);
@@ -127,31 +154,21 @@ fn main() -> Result<(), BridgeError> {
                 Ok(data) => data
             };
 
-            phase = 1;
-
             // flush data to stdout
             // eprintln!("read {} bytes", page.len());
             if block_is_good(&page) {
-                handle.write_all(&page)?;
-                blocks += 1;
-                write!(logfile, "block {} ok\n", blocks).unwrap();
+                if do_vecs_match(&page, &old_a) || do_vecs_match(&page, &old_b) {
+                    write!(logfile, "exact match found (protocol error), skipping").unwrap();
+                } else {
+                    handle.write_all(&page)?;
+                    blocks += 1;
+                    write!(logfile, "block {} ok\n", blocks).unwrap();
+                }
             } else {
                 diag_print(&mut logfile, &page, blocks);
             }
+            old_b = page.clone();
         }
         logfile.sync_all().unwrap();
-
-        // wait for a new phase -- don't check the "have", just read the fifo, b/c USB packets are expensive
-    	let timeout = time::Duration::from_millis(60_000);
-        let now = time::Instant::now();
-        while phase != bridge.peek(messible_out)? {
-            thread::sleep(time::Duration::from_millis(50));
-            //eprintln!("waiting for {}, got {} ", phase, bridge.peek(messible_out)?);
-            if now.elapsed() >= timeout {
-                eprintln!("Timeout synchronizing phase, advancing phase counter anyways.");
-		        write!(logfile, "Timeout synchronizing phase, advancing phase counter anyways.\n").unwrap();
-                break;
-            }
-        }
     }
 }
