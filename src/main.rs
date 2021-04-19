@@ -79,8 +79,8 @@ fn main() -> Result<(), BridgeError> {
     let ram_b = 0x4030_0000;
     let burst_len = 512 * 1024;
 
-    let messible2_in = 0xf001_1000; // replace with messible2_in
-    let messible_out = 0xf001_0004;
+    let messible2_in = 0xf001_0000; // replace with messible2_in
+    let messible_out = 0xf000_f004;
 
     /*
     loop {
@@ -95,7 +95,7 @@ fn main() -> Result<(), BridgeError> {
     let mut old_b: Vec<u8> = Vec::new();
     loop {
         // wait for a new phase -- don't check the "have", just read the fifo, b/c USB packets are expensive
-    	let timeout = time::Duration::from_millis(120_000);
+    	let timeout = time::Duration::from_millis(60_000);
         let now = time::Instant::now();
         loop {
             let mval = bridge.peek(messible_out)?;
@@ -103,7 +103,7 @@ fn main() -> Result<(), BridgeError> {
                 phase = mval;
                 break;
             }
-            thread::sleep(time::Duration::from_millis(100));
+            thread::sleep(time::Duration::from_millis(5));
             //eprintln!("waiting for {}, got {} ", phase, bridge.peek(messible_out)?);
             if now.elapsed() >= timeout {
                 eprintln!("Timeout synchronizing phase, advancing phase counter anyways.");
