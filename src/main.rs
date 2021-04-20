@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use std::fs::File;
 use wishbone_bridge::{UsbBridge, BridgeError};
 use std::{thread, time};
+use std::collections::HashMap;
 
 fn do_vecs_match<T: PartialEq>(a: &Vec<T>, b: &Vec<T>) -> bool {
     let matching = a.iter().zip(b.iter()).filter(|&(a, b)| a == b).count();
@@ -65,6 +66,26 @@ fn diag_print(logfile: &mut File, block: &Vec<u8>, blocks: i32) {
     write!(logfile, "\n\n").unwrap();
 }
 
+fn get_base(value: &str) -> (&str, u32) {
+    if value.starts_with("0x") {
+        (value.trim_start_matches("0x"), 16)
+    } else if value.starts_with("0X") {
+        (value.trim_start_matches("0X"), 16)
+    } else if value.starts_with("0b") {
+        (value.trim_start_matches("0b"), 2)
+    } else if value.starts_with("0B") {
+        (value.trim_start_matches("0B"), 2)
+    } else if value.starts_with('0') && value != "0" {
+        (value.trim_start_matches('0'), 8)
+    } else {
+        (value, 10)
+    }
+}
+fn parse_u32(value: &str) -> u32 {
+    let (value, base) = get_base(value);
+    u32::from_str_radix(value, base).unwrap()
+}
+
 fn main() -> Result<(), BridgeError> {
     let mut logfile = File::create("log.txt")?;
 
@@ -79,15 +100,88 @@ fn main() -> Result<(), BridgeError> {
     let ram_b = 0x4030_0000;
     let burst_len = 512 * 1024;
 
-    let messible2_in = 0xf001_0000; // replace with messible2_in
-    let messible_out = 0xf000_f004;
+    let maybe_csr_data = bridge.burst_read(0x2027_8000, 0x8000 as u32);
 
-    /*
-    loop {
-        let page = bridge.burst_read(ram_a, burst_len).unwrap();
-        // flush data to stdout
-        handle.write_all(&page)?;
-    }*/
+    let mut mapping = HashMap::new();
+
+    use std::convert::TryInto;
+    let csr_data: [u8; 0x8000] = if let Ok(data) = maybe_csr_data {
+        data[0..0x8000].try_into().unwrap()
+    } else {
+        [0 as u8; 0x8000]
+    };
+    use sha2::{Sha512, Digest};
+    let mut hasher = Sha512::new();
+    let hash_region: [u8; 0x7fc0] = csr_data[..0x7fc0].try_into().unwrap();
+    hasher.update(hash_region);
+    let result = hasher.finalize();
+    let mut hash_index = 0x7fc0;
+    let mut matched = true;
+    for b in result {
+        if b != csr_data[hash_index] {
+            log::trace!("CSR mismatch at 0x{:x}. Read 0x{:x}, computed 0x{:x}", hash_index, csr_data[hash_index], b);
+            matched = false;
+        }
+        hash_index += 1;
+    }
+    if matched {
+        log::trace!("Good hash check on CSR map stored on device.");
+        let csr_len = u32::from_le_bytes(csr_data[0..4].try_into().unwrap()) as usize;
+        let csr = &csr_data[4..4+csr_len];
+        let mut rdr = csv::ReaderBuilder::new().flexible(true).from_reader(csr);
+        for result in rdr.records() {
+            if let Ok(r) = result {
+                match &r[0] {
+                    "csr_register" => {
+                        let reg_name = &r[1];
+                        let base_addr = parse_u32(&r[2]);
+                        let num_regs = parse_u32(&r[3]);
+
+                        // If there's only one register, add it to the map.
+                        // However, CSRs can span multiple registers, and do so in reverse.
+                        // If this is the case, create indexed offsets for those registers.
+                        match num_regs {
+                            1 => {
+                                mapping.insert(reg_name.to_string().to_lowercase(), Some(base_addr));
+                            }
+                            n => {
+                                mapping.insert(reg_name.to_string().to_lowercase(), Some(base_addr));
+                                for logical_reg in 0..n {
+                                    mapping.insert(
+                                        format!(
+                                            "{}{}",
+                                            reg_name.to_string().to_lowercase(),
+                                            n - logical_reg - 1
+                                        ),
+                                        Some(base_addr + logical_reg * 4),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    "memory_region" => {
+                        let region = &r[1];
+                        let base_addr = parse_u32(&r[2]);
+                        mapping.insert(region.to_string().to_lowercase(), Some(base_addr));
+                    }
+                    "csr_base" => {
+                        let region = &r[1];
+                        let base_addr = parse_u32(&r[2]);
+                        mapping.insert(region.to_string().to_lowercase(), Some(base_addr));
+                    }
+                    _ => (),
+                };
+            }
+        }
+    } else {
+        eprintln!("Couldn't read CSR data out of device, quitting!");
+        std::process::exit(1);
+    }
+
+    //let messible2_in = 0xf001_0000; // replace with messible2_in
+    let messible2_in = mapping.get("messible2_in").unwrap().unwrap() as u32;
+    //let messible_out = 0xf000_f004;
+    let messible_out = mapping.get("messible_out").unwrap().unwrap() as u32;
 
     let mut blocks = 0;
     let mut phase = 0;
