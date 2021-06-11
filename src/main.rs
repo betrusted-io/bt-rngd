@@ -96,8 +96,8 @@ fn main() -> Result<(), BridgeError> {
     // connects to a device with the product ID of 0x5bf0.
     let bridge = UsbBridge::new().pid(0x5bf0).create()?;
 
-    let ram_a = 0x4020_0000;
-    let ram_b = 0x4030_0000;
+    let ram_a = 0x4080_0000;
+    let ram_b = 0x4090_0000;
     let burst_len = 512 * 1024;
 
     let maybe_csr_data = bridge.burst_read(0x2027_8000, 0x8000 as u32);
